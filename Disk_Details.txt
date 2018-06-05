@@ -1,0 +1,83 @@
+﻿
+$inputXML = @"
+ <Window 
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="MainWindow" Height="350" Width="525">
+    <Grid>
+        <Button x:Name="button" Content="Get Data" HorizontalAlignment="Left" Margin="217,19,0,0" VerticalAlignment="Top" Width="75"/>
+        <ListView x:Name="listView" HorizontalAlignment="Left" Height="221" Margin="34,60,0,0" VerticalAlignment="Top" Width="429" >
+            <ListView.View>
+                <GridView>
+                    <GridViewColumn Header="Drive Letter" Width="100" DisplayMemberBinding="{Binding Path=Drive Letter}" />
+                    <GridViewColumn Header="Drive Label" Width="100" DisplayMemberBinding="{Binding Path=Drive Label}"/>
+                    <GridViewColumn Header="Size" Width="100" DisplayMemberBinding="{Binding Path=Size(MB)}"/>
+                    <GridViewColumn Header="Free Space %" Width="100" DisplayMemberBinding="{Binding Path=FreeSpace%}"/>
+                </GridView>
+            </ListView.View>
+        </ListView>
+
+    </Grid>
+</Window>  
+"@       
+ 
+$inputXML = $inputXML -replace 'mc:Ignorable="d"','' -replace "x:N",'N'  -replace '^<Win.*', '<Window'
+ 
+[void][System.Reflection.Assembly]::LoadWithPartialName('presentationframework')
+[xml]$XAML = $inputXML
+#Read XAML
+ 
+    $reader=(New-Object System.Xml.XmlNodeReader $xaml)
+try{$Form=[Windows.Markup.XamlReader]::Load( $reader )}
+catch{Write-Warning "Unable to parse XML, with error: $($Error[0])`n Ensure that there are NO SelectionChanged properties (PowerShell cannot process them)"
+    throw}
+ 
+#===========================================================================
+# Load XAML Objects In PowerShell
+#===========================================================================
+ 
+$xaml.SelectNodes("//*[@Name]") | %{"trying item $($_.Name)";
+    try {Set-Variable -Name "WPF$($_.Name)" -Value $Form.FindName($_.Name) -ErrorAction Stop}
+    catch{throw}
+    }
+Function Get-FormVariables{
+if ($global:ReadmeDisplay -ne $true){Write-host "If you need to reference this display again, run Get-FormVariables" -ForegroundColor Yellow;$global:ReadmeDisplay=$true}
+write-host "Found the following interactable elements from our form" -ForegroundColor Cyan
+get-variable WPF*
+}
+ 
+Get-FormVariables
+ 
+#===========================================================================
+# Actually make the objects work
+#===========================================================================
+ 
+ Function Get-DiskInfo {
+param($computername =$env:COMPUTERNAME)
+ 
+Get-WMIObject Win32_logicaldisk -ComputerName $computername | Select-Object @{Name='ComputerName';Ex={$computername}},`
+                                                                    @{Name=‘Drive Letter‘;Expression={$_.DeviceID}},`
+                                                                    @{Name=‘Drive Label’;Expression={$_.VolumeName}},`
+                                                                    @{Name=‘Size(MB)’;Expression={[int]($_.Size / 1MB)}},`
+                                                                    @{Name=‘FreeSpace%’;Expression={[math]::Round($_.FreeSpace / $_.Size,2)*100}}
+                                                                 }
+ 
+ 
+$WPFbutton.Add_Click({
+$WPFlistView.Items.Clear()
+start-sleep -Milliseconds 840
+Get-DiskInfo -computername $env:COMPUTERNAME | % {$WPFlistView.AddChild($_)}
+})
+ 
+#Sample entry of how to add data to a field
+ 
+#$vmpicklistView.items.Add([pscustomobject]@{'VMName'=($_).Name;Status=$_.Status;Other="Yes"})
+ 
+#===========================================================================
+# Shows the form
+#===========================================================================
+write-host "To show the form, run the following" -ForegroundColor Cyan
+$Form.ShowDialog() | out-null
